@@ -1,0 +1,24 @@
+{
+    "agents": [
+        "claude_code"
+    ],
+    "guidelines": true,
+    "herd_mcp": false,
+    "mcp": true,
+    "nightwatch_mcp": false,
+    "packages": [
+        "laravel/fortify",
+        "laravel/ai"
+    ],
+    "sail": false,
+    "skills": [
+        "cashier-stripe-development",
+        "pennant-development",
+        "wayfinder-development",
+        "pest-testing",
+        "inertia-react-development",
+        "tailwindcss-development",
+        "ai-sdk-development",
+        "fortify-development"
+    ]
+}

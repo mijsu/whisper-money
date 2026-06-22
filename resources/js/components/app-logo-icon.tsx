@@ -1,0 +1,82 @@
+import { usePrivacyMode } from '@/contexts/privacy-mode-context';
+import { cn } from '@/lib/utils';
+import { SVGProps } from 'react';
+
+function Caffe2Icon(props: SVGProps<SVGSVGElement>) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 255 292"
+            {...props}
+        >
+            <path
+                fill="currentColor"
+                fillOpacity="0.3"
+                d="M202.384 162.431c0 45.623-36.985 82.607-82.608 82.607-45.621 0-82.606-36.984-82.606-82.607v-37.018h165.214v37.018Z"
+            />
+            <path
+                fill="currentColor"
+                d="m214.983 193.265-6.368-.001a93.625 93.625 0 0 0 5.217-30.832v-2.867h1.151c9.29 0 16.848 7.558 16.848 16.849 0 9.29-7.558 16.85-16.848 16.85m-95.207 40.326c-39.237 0-71.16-31.921-71.16-71.158v-25.57h142.32v25.57c0 18.263-6.922 34.937-18.273 47.548-13.035 14.484-31.912 23.61-52.886 23.61m95.207-97.2h-1.151v-10.977c0-6.323-5.124-11.448-11.449-11.448H37.17c-6.324 0-11.449 5.125-11.449 11.448v37.02c0 51.863 42.193 94.055 94.055 94.055 31.776 0 59.9-15.854 76.936-40.05h18.271c22.07 0 40.022-17.956 40.022-40.024 0-22.07-17.952-40.024-40.022-40.024m-89.267-75.45h-14.411V46.53a8.597 8.597 0 1 0-17.194 0v14.41H79.699a8.598 8.598 0 0 0 0 17.195h14.412v14.411a8.597 8.597 0 1 0 17.194 0v-14.41h14.411a8.599 8.599 0 0 0 0-17.195m49.423-37.932h-14.41V8.597a8.599 8.599 0 0 0-17.196 0V23.01h-14.41a8.597 8.597 0 1 0 0 17.194h14.41v14.411a8.598 8.598 0 0 0 17.196 0V40.203h14.41a8.598 8.598 0 1 0 0-17.194m53.688 268.905H11.448C5.125 291.914 0 286.79 0 280.465c0-6.324 5.125-11.448 11.448-11.448h217.38c6.325 0 11.448 5.124 11.448 11.448 0 6.325-5.123 11.449-11.449 11.449"
+            />
+        </svg>
+    );
+}
+
+function PrivacyMark(props: SVGProps<SVGSVGElement>) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 255 292"
+            {...props}
+        >
+            <path
+                fill="currentColor"
+                d="M214.983 193.265h-6.368a93.625 93.625 0 0 0 5.217-30.833v-2.867h1.151c9.29 0 16.848 7.558 16.848 16.849c0 9.29-7.557 16.85-16.848 16.85m-95.207 40.326c-39.237 0-71.16-31.921-71.16-71.158v-25.57h142.32v25.57c0 18.263-6.922 34.937-18.273 47.548-13.035 14.484-31.912 23.61-52.886 23.61m95.207-97.2h-1.151v-10.977c0-6.323-5.124-11.448-11.449-11.448H37.17c-6.324 0-11.449 5.125-11.449 11.448v37.02c0 51.863 42.193 94.055 94.055 94.055c31.776 0 59.9-15.854 76.936-40.05h18.271c22.07 0 40.022-17.956 40.022-40.024c0-22.07-17.952-40.024-40.022-40.024"
+            />
+        </svg>
+    );
+}
+
+export default function AppLogoIcon({
+    className,
+    animated = false,
+}: {
+    className?: SVGProps<SVGSVGElement>['className'];
+    animated?: boolean;
+}) {
+    const { isPrivacyModeEnabled } = usePrivacyMode();
+
+    const iconClasses = cn(
+        'size-5 text-[#1b1b18] dark:text-[#EDEDEC]',
+        className,
+    );
+
+    if (!animated) {
+        return <Caffe2Icon className={iconClasses} />;
+    }
+
+    const showPrivacy = isPrivacyModeEnabled;
+
+    return (
+        <div className="relative size-5">
+            <Caffe2Icon
+                className={cn(
+                    iconClasses,
+                    'absolute inset-0 transition-all duration-300',
+                    showPrivacy
+                        ? 'scale-75 opacity-0'
+                        : 'scale-100 opacity-100',
+                )}
+            />
+            <PrivacyMark
+                className={cn(
+                    iconClasses,
+                    'absolute inset-0 transition-all duration-300',
+                    showPrivacy
+                        ? 'scale-100 opacity-100'
+                        : 'scale-75 opacity-0',
+                )}
+            />
+        </div>
+    );
+}

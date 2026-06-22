@@ -1,0 +1,119 @@
+<?php
+
+namespace App\Services;
+
+use App\Enums\BudgetPeriodType;
+use App\Models\Budget;
+use App\Models\BudgetPeriod;
+use Carbon\Carbon;
+
+class BudgetPeriodService
+{
+    public function generatePeriod(Budget $budget, ?int $allocatedAmount = null, ?Carbon $startDate = null, bool $processHistorical = false): BudgetPeriod
+    {
+        if ($startDate === null) {
+            $startDate = $this->calculateNextPeriodStartDate($budget);
+        }
+
+        [$periodStart, $periodEnd] = $this->calculatePeriodDates($budget, $startDate);
+
+        $periodStart = $periodStart->startOfDay();
+        $periodEnd = $periodEnd->startOfDay();
+
+        // If no allocated amount provided, use the last period's amount or 0
+        if ($allocatedAmount === null) {
+            $lastPeriod = $budget->periods()->orderBy('end_date', 'desc')->first();
+            $allocatedAmount = $lastPeriod !== null ? $lastPeriod->allocated_amount : 0;
+        }
+
+        // Idempotent on the (budget_id, start_date) unique key: the scheduled
+        // command can recompute the same next start date across overlapping or
+        // repeated runs, so return the existing period instead of colliding.
+        return BudgetPeriod::firstOrCreate(
+            [
+                'budget_id' => $budget->id,
+                'start_date' => $periodStart,
+            ],
+            [
+                'end_date' => $periodEnd,
+                'allocated_amount' => $allocatedAmount,
+                'carried_over_amount' => 0,
+                'processing_historical' => $processHistorical,
+            ],
+        );
+    }
+
+    public function generatePreviousPeriod(Budget $budget, BudgetPeriod $period, ?int $allocatedAmount = null, bool $processHistorical = false): BudgetPeriod
+    {
+        $referenceDate = $period->start_date->copy()->subDay();
+
+        return $this->generatePeriod($budget, $allocatedAmount ?? $period->allocated_amount, $referenceDate, $processHistorical);
+    }
+
+    public function closePeriod(BudgetPeriod $period): void
+    {
+        $budget = $period->budget;
+        $carriedOverAmount = 0;
+
+        if ($budget->rollover_type->value === 'carry_over') {
+            $totalSpent = $period->budgetTransactions()->sum('amount');
+            $remaining = $period->allocated_amount - $totalSpent;
+
+            if ($remaining > 0) {
+                $carriedOverAmount = $remaining;
+            }
+        }
+
+        $nextPeriod = $this->generatePeriod($budget, $period->allocated_amount);
+        $nextPeriod->update(['carried_over_amount' => $carriedOverAmount]);
+    }
+
+    public function calculatePeriodDates(Budget $budget, Carbon $referenceDate): array
+    {
+        $startDate = $referenceDate->copy();
+
+        switch ($budget->period_type) {
+            case BudgetPeriodType::Monthly:
+                $startDate->day($budget->period_start_day ?? 1);
+                if ($startDate > $referenceDate) {
+                    $startDate->subMonth();
+                }
+                $endDate = $startDate->copy()->addMonth()->subDay();
+                break;
+
+            case BudgetPeriodType::Weekly:
+                $dayOfWeek = $budget->period_start_day ?? 0;
+                while ($startDate->dayOfWeek !== $dayOfWeek) {
+                    $startDate->subDay();
+                }
+                $endDate = $startDate->copy()->addWeek()->subDay();
+                break;
+
+            case BudgetPeriodType::Biweekly:
+                $dayOfWeek = $budget->period_start_day ?? 0;
+                while ($startDate->dayOfWeek !== $dayOfWeek) {
+                    $startDate->subDay();
+                }
+                $endDate = $startDate->copy()->addWeeks(2)->subDay();
+                break;
+
+            case BudgetPeriodType::Yearly:
+                $startDate->startOfYear();
+                $endDate = $startDate->copy()->addYear()->subDay();
+                break;
+        }
+
+        return [$startDate, $endDate];
+    }
+
+    protected function calculateNextPeriodStartDate(Budget $budget): Carbon
+    {
+        $lastPeriod = $budget->periods()->orderBy('end_date', 'desc')->first();
+
+        if ($lastPeriod) {
+            return $lastPeriod->end_date->copy()->addDay();
+        }
+
+        return now();
+    }
+}

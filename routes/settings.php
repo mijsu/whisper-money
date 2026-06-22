@@ -1,0 +1,104 @@
+<?php
+
+use App\Http\Controllers\OpenBanking\ConnectionController;
+use App\Http\Controllers\Settings\AccountController;
+use App\Http\Controllers\Settings\AutomationRuleApplicationController;
+use App\Http\Controllers\Settings\AutomationRuleController;
+use App\Http\Controllers\Settings\BankController;
+use App\Http\Controllers\Settings\CategoryController;
+use App\Http\Controllers\Settings\ChartColorSchemeController;
+use App\Http\Controllers\Settings\LabelController;
+use App\Http\Controllers\Settings\NetWorthChartLoanPreferenceController;
+use App\Http\Controllers\Settings\NetWorthChartRealEstatePreferenceController;
+use App\Http\Controllers\Settings\NotificationPreferenceController;
+use App\Http\Controllers\Settings\PasswordController;
+use App\Http\Controllers\Settings\ProfileController;
+use App\Http\Controllers\Settings\TimezoneController;
+use App\Http\Controllers\Settings\TwoFactorAuthenticationController;
+use App\Http\Controllers\SubscriptionController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
+
+Route::middleware('auth')->group(function () {
+    Route::redirect('settings', '/settings/accounts');
+
+    Route::get('settings/account', [ProfileController::class, 'account'])->name('account.edit');
+    Route::patch('settings/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::patch('settings/timezone', [TimezoneController::class, 'update'])->name('timezone.update');
+    Route::delete('settings/profile', [ProfileController::class, 'destroy'])
+        ->middleware('block-demo')
+        ->name('profile.destroy');
+
+    Route::get('settings/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::get('settings/password', [PasswordController::class, 'edit'])->name('user-password.edit');
+
+    Route::put('settings/password', [PasswordController::class, 'update'])
+        ->middleware(['throttle:6,1', 'block-demo'])
+        ->name('user-password.update');
+
+    Route::get('settings/accounts', [AccountController::class, 'index'])->name('accounts.index');
+    Route::post('settings/accounts', [AccountController::class, 'store'])->name('accounts.store');
+    Route::patch('settings/accounts/{account}', [AccountController::class, 'update'])->name('accounts.update');
+    Route::delete('settings/accounts/{account}', [AccountController::class, 'destroy'])->name('accounts.destroy');
+
+    Route::patch('settings/notifications', [NotificationPreferenceController::class, 'update'])
+        ->name('notifications.update');
+
+    Route::get('settings/banks', [BankController::class, 'index'])->name('banks.index');
+    Route::post('settings/banks', [BankController::class, 'store'])->name('banks.store');
+
+    Route::get('settings/categories', [CategoryController::class, 'index'])->name('categories.index');
+    Route::post('settings/categories', [CategoryController::class, 'store'])->name('categories.store');
+    Route::patch('settings/categories/{category}', [CategoryController::class, 'update'])->name('categories.update');
+    Route::delete('settings/categories/{category}', [CategoryController::class, 'destroy'])->name('categories.destroy');
+
+    Route::get('settings/labels', [LabelController::class, 'index'])->name('labels.index');
+    Route::post('settings/labels', [LabelController::class, 'store'])->name('labels.store');
+    Route::patch('settings/labels/{label}', [LabelController::class, 'update'])->name('labels.update');
+    Route::delete('settings/labels/{label}', [LabelController::class, 'destroy'])->name('labels.destroy');
+
+    Route::redirect('settings/budgets', '/budgets')->name('budgets.settings');
+
+    Route::get('settings/automation-rules', [AutomationRuleController::class, 'index'])->name('automation-rules.index');
+    Route::post('settings/automation-rules', [AutomationRuleController::class, 'store'])->name('automation-rules.store');
+    Route::patch('settings/automation-rules/{automationRule}', [AutomationRuleController::class, 'update'])->name('automation-rules.update');
+    Route::delete('settings/automation-rules/{automationRule}', [AutomationRuleController::class, 'destroy'])->name('automation-rules.destroy');
+
+    Route::get('settings/automation-rules/{automationRule}/matches', [AutomationRuleApplicationController::class, 'matches'])
+        ->name('automation-rules.matches');
+    Route::post('settings/automation-rules/{automationRule}/apply', [AutomationRuleApplicationController::class, 'apply'])
+        ->name('automation-rules.apply');
+    Route::get('settings/automation-rules/apply/status/{jobId}', [AutomationRuleApplicationController::class, 'status'])
+        ->name('automation-rules.apply.status');
+
+    Route::get('settings/appearance', function () {
+        return Inertia::render('settings/appearance');
+    })->name('appearance.edit');
+
+    Route::patch('settings/chart-color-scheme', [ChartColorSchemeController::class, 'update'])
+        ->name('chart-color-scheme.update');
+
+    Route::patch('settings/net-worth-chart-loan-preference', [NetWorthChartLoanPreferenceController::class, 'update'])
+        ->name('net-worth-chart-loan-preference.update');
+
+    Route::patch('settings/net-worth-chart-real-estate-preference', [NetWorthChartRealEstatePreferenceController::class, 'update'])
+        ->name('net-worth-chart-real-estate-preference.update');
+
+    Route::get('settings/billing', [SubscriptionController::class, 'billing'])->name('settings.billing');
+    Route::get('settings/billing/portal', [SubscriptionController::class, 'billingPortal'])->name('settings.billing.portal');
+
+    Route::get('settings/delete-account', function (Request $request) {
+        return Inertia::render('settings/delete-account', [
+            'hasActiveSubscriptionOrTrial' => $request->user()->hasActiveSubscriptionOrTrial(),
+        ]);
+    })->name('delete-account.edit');
+
+    Route::get('settings/two-factor', [TwoFactorAuthenticationController::class, 'show'])
+        ->name('two-factor.show');
+
+    Route::get('settings/connections', [ConnectionController::class, 'index'])->name('settings.connections.index');
+    Route::post('settings/connections/{connection}/sync', [ConnectionController::class, 'sync'])->name('settings.connections.sync');
+    Route::patch('settings/connections/{connection}/credentials', [ConnectionController::class, 'updateCredentials'])->name('settings.connections.update-credentials');
+    Route::delete('settings/connections/{connection}', [ConnectionController::class, 'destroy'])->name('settings.connections.destroy');
+});

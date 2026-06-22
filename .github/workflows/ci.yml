@@ -1,0 +1,551 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+    inputs:
+      build_only:
+        description: 'Build Docker image only (skip deploy)'
+        type: boolean
+        default: true
+
+jobs:
+  build-assets:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP & Composer Deps
+        uses: ./.github/actions/setup-php-deps
+
+      - name: Setup Bun & Node Deps
+        uses: ./.github/actions/setup-bun-deps
+
+      - name: Build Assets
+        run: bun run build
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-assets
+          path: public/build
+          retention-days: 1
+
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: testing
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP & Composer Deps
+        uses: ./.github/actions/setup-php-deps
+
+      - name: Copy Environment File
+        run: cp .env.example .env
+
+      - name: Generate Application Key
+        run: php artisan key:generate
+
+      - name: Tests
+        # --parallel splits the suite across workers via paratest. Each
+        # worker creates its own "testing_test_<N>" database; the mysql
+        # service runs as root which has CREATE on *.* so this Just Works
+        # without extra grants. Performance suite is excluded because
+        # concurrent load skews its timing-based assertions.
+        run: ./vendor/bin/pest --exclude-testsuite=Browser,Performance --parallel --processes=4
+        env:
+          TESTCONTAINERS: false
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: testing
+          DB_USERNAME: root
+          DB_PASSWORD: password
+
+  browser-tests:
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    needs: browser-tests-matrix
+    steps:
+      - name: Aggregate shard results
+        run: |
+          if [ "${{ needs.browser-tests-matrix.result }}" != "success" ]; then
+            echo "One or more browser-tests shards failed: ${{ needs.browser-tests-matrix.result }}"
+            exit 1
+          fi
+          echo "All browser-tests shards passed."
+
+  browser-tests-matrix:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: testing
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP & Composer Deps
+        uses: ./.github/actions/setup-php-deps
+
+      - name: Setup Bun & Node Deps
+        uses: ./.github/actions/setup-bun-deps
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: playwright-${{ runner.os }}-
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+
+      - name: Install Playwright system deps
+        run: npx playwright install-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+
+      - name: Build Assets
+        run: bun run build
+
+      - name: Copy Environment File
+        run: cp .env.example .env
+
+      - name: Generate Application Key
+        run: php artisan key:generate
+
+      - name: Browser Tests
+        run: ./vendor/bin/pest --testsuite=Browser --ci --shard=${{ matrix.shard }}/6
+        env:
+          TESTCONTAINERS: false
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: testing
+          DB_USERNAME: root
+          DB_PASSWORD: password
+
+  update-browser-shards:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_only == false
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: testing
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP & Composer Deps
+        uses: ./.github/actions/setup-php-deps
+
+      - name: Setup Bun & Node Deps
+        uses: ./.github/actions/setup-bun-deps
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: playwright-${{ runner.os }}-
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+
+      - name: Install Playwright system deps
+        run: npx playwright install-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+
+      - name: Build Assets
+        run: bun run build
+
+      - name: Copy Environment File
+        run: cp .env.example .env
+
+      - name: Generate Application Key
+        run: php artisan key:generate
+
+      - name: Update Browser Shards
+        run: ./vendor/bin/pest --testsuite=Browser --ci --update-shards
+        env:
+          TESTCONTAINERS: false
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: testing
+          DB_USERNAME: root
+          DB_PASSWORD: password
+
+      - name: Upload Browser Shards
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-shards
+          path: tests/.pest/shards.json
+          retention-days: 1
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP & Composer Deps
+        uses: ./.github/actions/setup-php-deps
+        with:
+          composer-args: '-q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist'
+
+      - name: Run PHPStan
+        run: vendor/bin/phpstan analyse --memory-limit=512M --no-progress
+
+  linter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP & Composer Deps
+        uses: ./.github/actions/setup-php-deps
+        with:
+          composer-args: '-q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist'
+
+      - name: Setup Bun & Node Deps
+        uses: ./.github/actions/setup-bun-deps
+
+      - name: Cache Pint results
+        uses: actions/cache@v4
+        with:
+          path: .pint.cache
+          key: pint-${{ runner.os }}-${{ hashFiles('composer.lock', 'pint.json') }}
+          restore-keys: pint-${{ runner.os }}-
+
+      - name: Run Pint
+        run: vendor/bin/pint --test --parallel --cache-file=.pint.cache
+
+      - name: Format Frontend
+        run: bun run format
+
+      - name: Lint Frontend
+        run: bun run lint
+
+      - name: Frontend Tests
+        run: bun run test
+
+  performance-tests:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: testing
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP & Composer Deps
+        uses: ./.github/actions/setup-php-deps
+
+      - name: Copy Environment File
+        run: cp .env.example .env
+
+      - name: Generate Application Key
+        run: php artisan key:generate
+
+      - name: Performance Tests
+        run: ./vendor/bin/pest --testsuite=Performance
+        env:
+          TESTCONTAINERS: false
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: testing
+          DB_USERNAME: root
+          DB_PASSWORD: password
+
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'app/**'
+              - 'bootstrap/**'
+              - 'config/**'
+              - 'database/**'
+              - 'public/**'
+              - 'resources/**'
+              - 'routes/**'
+              - 'storage/**'
+              - 'artisan'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'bun.lock'
+              - 'bun.lockb'
+              - 'vite.config.*'
+              - 'tsconfig*.json'
+              - 'eslint.config.*'
+              - '.prettierrc*'
+              - 'phpstan.neon*'
+              - 'phpunit.xml*'
+              - 'pint.json'
+              - 'Dockerfile'
+              - 'Dockerfile.*'
+              - 'docker/**'
+              - '.dockerignore'
+              - '.env.example'
+              - '.env.production.example'
+              - 'docker-compose.production.yml'
+              - 'docker-compose.production.local.yml'
+              - 'templates/coolify/**'
+              - '.github/workflows/ci.yml'
+
+  build-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [tests, linter, static-analysis, performance-tests, changes]
+    if: ((github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event_name == 'workflow_dispatch') && needs.changes.outputs.code == 'true'
+    outputs:
+      development-digest: ${{ steps.development-image.outputs.digest }}
+      production-digest: ${{ steps.production-image.outputs.digest }}
+      package-version: ${{ steps.package-version.outputs.version }}
+    env:
+      SENTRY_RELEASE: whisper-money@${{ github.sha }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Sentry CLI
+        run: curl -sL https://sentry.io/get-cli/ | bash
+
+      - name: Create Sentry release
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: |
+          if ! sentry-cli releases info "$SENTRY_RELEASE" >/dev/null 2>&1; then
+            sentry-cli releases new "$SENTRY_RELEASE"
+          fi
+
+          sentry-cli releases set-commits "$SENTRY_RELEASE" --auto --ignore-missing
+          sentry-cli releases finalize "$SENTRY_RELEASE"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Extract package version
+        id: package-version
+        run: node -e "console.log('version=' + require('./package.json').version)" >> "$GITHUB_OUTPUT"
+
+      - name: Extract production metadata
+        id: production-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=,suffix=-production
+            type=raw,value=production
+            type=raw,value=v${{ steps.package-version.outputs.version }}-production
+
+      - name: Build and push development image
+        id: development-image
+        uses: docker/build-push-action@v6
+        timeout-minutes: 20
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SENTRY_RELEASE=${{ env.SENTRY_RELEASE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push production image
+        id: production-image
+        uses: docker/build-push-action@v6
+        timeout-minutes: 25
+        with:
+          context: .
+          file: Dockerfile.production
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.production-meta.outputs.tags }}
+          labels: ${{ steps.production-meta.outputs.labels }}
+          build-args: |
+            SENTRY_RELEASE=${{ env.SENTRY_RELEASE }}
+          cache-from: type=gha,scope=production
+          cache-to: type=gha,mode=max,scope=production
+
+  build-arm64-images:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 75
+    needs: build-image
+    if: needs.build-image.result == 'success'
+    env:
+      SENTRY_RELEASE: whisper-money@${{ github.sha }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Extract production metadata
+        id: production-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=,suffix=-production
+            type=raw,value=production
+            type=raw,value=v${{ needs.build-image.outputs.package-version }}-production
+
+      - name: Build and push arm64 development image by digest
+        id: development-arm64
+        uses: docker/build-push-action@v6
+        timeout-minutes: 30
+        with:
+          context: .
+          platforms: linux/arm64
+          tags: ghcr.io/${{ github.repository }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            SENTRY_RELEASE=${{ env.SENTRY_RELEASE }}
+          cache-from: type=gha,scope=arm64
+          cache-to: type=gha,mode=max,scope=arm64
+
+      - name: Publish multi-platform development manifests
+        env:
+          AMD64_DIGEST: ${{ needs.build-image.outputs.development-digest }}
+          ARM64_DIGEST: ${{ steps.development-arm64.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+
+            docker buildx imagetools create \
+              --tag "$tag" \
+              "$IMAGE@$AMD64_DIGEST" \
+              "$IMAGE@$ARM64_DIGEST"
+          done <<< "$TAGS"
+
+      - name: Build and push arm64 production image by digest
+        id: production-arm64
+        uses: docker/build-push-action@v6
+        timeout-minutes: 40
+        with:
+          context: .
+          file: Dockerfile.production
+          platforms: linux/arm64
+          tags: ghcr.io/${{ github.repository }}
+          labels: ${{ steps.production-meta.outputs.labels }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            SENTRY_RELEASE=${{ env.SENTRY_RELEASE }}
+          cache-from: type=gha,scope=production-arm64
+          cache-to: type=gha,mode=max,scope=production-arm64
+
+      - name: Publish multi-platform production manifests
+        env:
+          AMD64_DIGEST: ${{ needs.build-image.outputs.production-digest }}
+          ARM64_DIGEST: ${{ steps.production-arm64.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository }}
+          TAGS: ${{ steps.production-meta.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+
+            docker buildx imagetools create \
+              --tag "$tag" \
+              "$IMAGE@$AMD64_DIGEST" \
+              "$IMAGE@$ARM64_DIGEST"
+          done <<< "$TAGS"
